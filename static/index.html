@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Night Owl JEE Buddy</title>
+<style>
+  :root{--bg:#0e1116;--card:#171b22;--ink:#e8e6e3;--mute:#8b93a1;--acc:#ff7a45;--line:#262c36}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,sans-serif}
+  main{max-width:720px;margin:0 auto;padding:16px}
+  h1{font-size:22px;margin:8px 0 2px}
+  .sub{color:var(--mute);margin:0 0 14px;font-size:14px}
+  nav{display:flex;gap:8px;margin-bottom:14px}
+  nav button{flex:1;padding:10px;border:1px solid var(--line);background:var(--card);color:var(--mute);border-radius:10px;font-size:15px}
+  nav button.on{color:var(--ink);border-color:var(--acc)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  textarea,select{width:100%;background:#0b0e13;color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:10px;font:inherit}
+  textarea{min-height:110px;resize:vertical}
+  .row{display:flex;gap:8px;margin-top:8px;align-items:center}
+  .btn{background:var(--acc);color:#1a0d05;border:0;border-radius:10px;padding:10px 16px;font-weight:600;font-size:15px}
+  .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .btn:disabled{opacity:.5}
+  .answer{white-space:pre-wrap;word-wrap:break-word}
+  .tag{font-size:12px;color:var(--mute)}
+  img#preview{max-width:100%;border-radius:10px;margin-top:8px}
+  label.file{border:1px dashed var(--line);border-radius:10px;padding:9px 12px;color:var(--mute);font-size:14px;cursor:pointer}
+  input[type=file]{display:none}
+  .big{font-size:20px;margin:4px 0}
+</style>
+</head>
+<body>
+<main>
+  <h1>🦉 Night Owl JEE Buddy</h1>
+  <p class="sub">Runs on an open model on one laptop. Your doubts never leave this Wi-Fi.</p>
+  <nav>
+    <button data-tab="ask" class="on">Ask</button>
+    <button data-tab="revise">Revise</button>
+    <button data-tab="weekend">Weekend</button>
+  </nav>
+
+  <section id="ask" class="tab">
+    <div class="card">
+      <select id="subject">
+        <option>Physics</option><option>Chemistry</option><option>Maths</option>
+      </select>
+      <textarea id="q" placeholder="Type your doubt, or add a photo of the problem…" style="margin-top:8px"></textarea>
+      <img id="preview" hidden alt="problem photo">
+      <div class="row">
+        <label class="file">📷 Photo<input id="photo" type="file" accept="image/*"></label>
+        <button id="ask-btn" class="btn" style="margin-left:auto">Explain it</button>
+      </div>
+    </div>
+    <div class="card answer" id="answer" hidden></div>
+  </section>
+
+  <section id="revise" class="tab" hidden>
+    <div class="card">
+      <div class="row" style="margin-top:0">
+        <button id="quiz-btn" class="btn">Quiz me on my weak spots</button>
+      </div>
+      <div id="quiz" class="answer" style="margin-top:10px" hidden></div>
+    </div>
+    <div id="doubts"></div>
+  </section>
+
+  <section id="weekend" class="tab" hidden>
+    <div class="card">
+      <p id="sunday" class="tag" hidden>It's Sunday. Gentle reminder: one chapter before the movie? 😄</p>
+      <p class="tag">Tonight's plan</p>
+      <p class="big" id="cook"></p>
+      <p class="big" id="movie"></p>
+      <div class="row"><button id="shuffle" class="btn ghost">Shuffle</button></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+let imgData = null;
+
+/* ---------- tabs ---------- */
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => show(b.dataset.tab));
+function show(t){
+  document.querySelectorAll('.tab').forEach(x => x.hidden = x.id !== t);
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  if (t === 'revise') loadDoubts();
+  if (t === 'weekend') shuffle();
+}
+
+/* ---------- ask ---------- */
+function shrink(file){
+  return new Promise(res => {
+    const img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, 1280 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = img.width * s; c.height = img.height * s;
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      res(c.toDataURL('image/jpeg', .85).split(',')[1]);
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+$('#photo').onchange = async e => {
+  const f = e.target.files[0];
+  if (!f) { imgData = null; $('#preview').hidden = true; return; }
+  imgData = await shrink(f);
+  $('#preview').src = 'data:image/jpeg;base64,' + imgData;
+  $('#preview').hidden = false;
+};
+$('#ask-btn').onclick = async () => {
+  const q = $('#q').value.trim();
+  if (!q && !imgData) return;
+  const out = $('#answer');
+  out.hidden = false; out.textContent = 'Thinking…';
+  $('#ask-btn').disabled = true;
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({question: q, subject: $('#subject').value, image: imgData})
+    });
+    const rd = r.body.getReader(), dec = new TextDecoder();
+    out.textContent = '';
+    while (true) {
+      const {done, value} = await rd.read();
+      if (done) break;
+      out.textContent += dec.decode(value, {stream: true});
+    }
+  } catch (e) {
+    out.textContent = 'Could not reach the tutor. Is the server running?';
+  }
+  $('#ask-btn').disabled = false;
+};
+
+/* ---------- revise ---------- */
+async function loadDoubts(){
+  const box = $('#doubts');
+  box.textContent = '';
+  const items = await (await fetch('/api/doubts')).json();
+  if (!items.length) {
+    const p = document.createElement('p'); p.className = 'tag';
+    p.textContent = 'No doubts yet. Ask one on the Ask tab.'; box.append(p); return;
+  }
+  items.forEach(it => {
+    const card = document.createElement('div'); card.className = 'card';
+    const tag = document.createElement('div'); tag.className = 'tag';
+    tag.textContent = `${it.subject} · ${it.ts}${it.mastered ? ' · ✅ mastered' : ''}`;
+    const q = document.createElement('div'); q.textContent = it.question; q.style.fontWeight = '600';
+    const row = document.createElement('div'); row.className = 'row';
+    const prac = document.createElement('button'); prac.className = 'btn ghost'; prac.textContent = 'Practise this';
+    prac.onclick = () => runQuiz(it.id);
+    const done = document.createElement('button'); done.className = 'btn ghost'; done.textContent = 'Got it ✓';
+    done.onclick = async () => {
+      await fetch('/api/doubts/mastered', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: it.id})});
+      loadDoubts();
+    };
+    row.append(prac, done);
+    card.append(tag, q, row);
+    box.append(card);
+  });
+}
+async function runQuiz(id){
+  const box = $('#quiz'); box.hidden = false; box.textContent = 'Making a fresh problem…';
+  window.scrollTo({top: 0, behavior: 'smooth'});
+  const r = await (await fetch('/api/quiz', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id})
+  })).json();
+  box.textContent = '';
+  if (r.error) { box.textContent = r.error; return; }
+  const p = document.createElement('div'); p.textContent = r.problem;
+  const a = document.createElement('div'); a.textContent = r.answer; a.hidden = true; a.style.marginTop = '8px'; a.className = 'tag';
+  const b = document.createElement('button'); b.className = 'btn ghost'; b.textContent = 'Show answer'; b.style.marginTop = '8px';
+  b.onclick = () => { a.hidden = false; b.hidden = true; };
+  box.append(p, b, a);
+}
+$('#quiz-btn').onclick = () => runQuiz(null);
+
+/* ---------- weekend ---------- */
+const COOK = ['Egg fried rice', 'Pasta arrabbiata', 'Paneer tikka on a tawa', 'Aloo parathas',
+              'Veg biryani', 'Loaded Maggi', 'Cheese sandwiches + tomato soup', 'Pav bhaji'];
+const MOVIES = ['Tumbbad', 'Stree', 'Pari', 'Bhoot', 'The Conjuring', 'Train to Busan', 'Get Out', 'Hereditary'];
+function shuffle(){
+  $('#cook').textContent = '🍳 Cook: ' + COOK[Math.floor(Math.random() * COOK.length)];
+  $('#movie').textContent = '🎬 Watch: ' + MOVIES[Math.floor(Math.random() * MOVIES.length)];
+  $('#sunday').hidden = new Date().getDay() !== 0;
+}
+$('#shuffle').onclick = shuffle;
+</script>
+</body>
+</html>
